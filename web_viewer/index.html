@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CS436 Final Project - Virtual Tour</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; font-family: sans-serif; }
+        
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 2; pointer-events: none; 
+            opacity: 0;
+            transition: opacity 1.5s ease-in-out; 
+            background-size: cover;
+            background-position: center;
+            display: flex; align-items: flex-end; justify-content: center;
+        }
+
+        #ui-layer {
+            position: absolute; top: 20px; left: 20px; z-index: 5;
+            color: #0f0; font-family: monospace; text-shadow: 1px 1px 2px black;
+            pointer-events: none;
+        }
+        
+        #exit-btn {
+            pointer-events: auto; background: rgba(0,0,0,0.8); color: white; 
+            border: 1px solid white; padding: 12px 24px; margin-bottom: 50px; 
+            cursor: pointer; display: none; font-size: 16px; text-transform: uppercase; letter-spacing: 1px;
+            transition: background 0.3s;
+        }
+        #exit-btn:hover { background: #333; }
+
+        .key { color: #ffff00; font-weight: bold; }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@tweenjs/tween.js": "https://unpkg.com/@tweenjs/tween.js@23.1.1/dist/tween.esm.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="ui-layer">
+        <div id="status">Loading Scene...</div>
+        <div style="font-size: 12px; margin-top: 10px; opacity: 0.8;">
+            <b>Controls:</b><br>
+            <span class="key">WASD</span> Fly / Move<br>
+            <span class="key">ARROWS</span> Look / Rotate<br>
+            <span class="key">Q / E</span> Up / Down<br>
+            <span class="key">CLICK DOT</span> Align & Fade In
+        </div>
+    </div>
+    
+    <div id="canvas-container"></div>
+    
+    <div id="overlay">
+        <button id="exit-btn">Return to Free Roam</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+        import * as TWEEN from '@tweenjs/tween.js';
+
+        let scene, camera, renderer;
+        let raycaster, mouse;
+        let cameraMarkers = [];
+        let isLocked = false; 
+
+        const keys = { w:false, a:false, s:false, d:false, q:false, e:false, ArrowUp:false, ArrowDown:false, ArrowLeft:false, ArrowRight:false, Shift:false };
+        let pitch = 0;
+        let yaw = 0;
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a1a); 
+            scene.fog = new THREE.FogExp2(0x1a1a1a, 0.05); 
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 100);
+            camera.position.set(0, 0.5, 2.5); 
+            camera.rotation.order = "YXZ"; 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambient);
+            
+            const mainLight = new THREE.DirectionalLight(0xffffff, 1);
+            mainLight.position.set(5, 10, 7);
+            scene.add(mainLight);
+            
+            const fillLight = new THREE.DirectionalLight(0x4444ff, 0.3); 
+            fillLight.position.set(-5, 0, -5);
+            scene.add(fillLight);
+
+            const loader = new OBJLoader();
+            loader.load('./scene.obj', (obj) => {
+                obj.traverse((child) => {
+                    if (child.isMesh) {
+                        child.material = new THREE.MeshStandardMaterial({ 
+                            color: 0xcccccc, 
+                            roughness: 0.8,
+                            wireframe: false
+                        });
+                    }
+                });
+                
+                obj.rotation.x = -Math.PI / 2;
+                scene.add(obj);
+                
+                document.getElementById('status').innerText = "Scene Loaded. Loading Cameras...";
+                loadCameras();
+            });
+
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('click', onMouseClick);
+            document.getElementById('exit-btn').addEventListener('click', exitViewMode);
+            
+            window.addEventListener('keydown', (e) => { 
+                if(keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.code)) keys[e.key] = true; 
+                if(e.shiftKey) keys.Shift = true;
+            });
+            window.addEventListener('keyup', (e) => { 
+                if(keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.code)) keys[e.key] = false; 
+                if(!e.shiftKey) keys.Shift = false;
+            });
+        }
+
+        function loadCameras() {
+            fetch('./cameras.json')
+                .then(res => res.json())
+                .then(data => {
+                    data.forEach(entry => {
+                        const geometry = new THREE.SphereGeometry(0.03, 32, 32);
+                        const material = new THREE.MeshBasicMaterial({ color: 0x00aaff });
+                        const marker = new THREE.Mesh(geometry, material);
+                        
+                        marker.position.fromArray(entry.pos);
+                        
+                        marker.userData = { 
+                            file: entry.file, 
+                            pos: entry.pos, 
+                            quat: entry.quat, 
+                            fov: entry.fov 
+                        };
+                        
+                        scene.add(marker);
+                        cameraMarkers.push(marker);
+                    });
+                    document.getElementById('status').innerText = "Ready. Use Keys to Fly.";
+                    document.getElementById('status').style.color = "white";
+                })
+                .catch(err => console.error(err));
+        }
+
+        function updateControls() {
+            if (isLocked) return; 
+
+            const speed = keys.Shift ? 0.05 : 0.01; 
+            const lookSpeed = 0.02;
+
+            if (keys.ArrowLeft) yaw += lookSpeed;
+            if (keys.ArrowRight) yaw -= lookSpeed;
+            if (keys.ArrowUp) pitch += lookSpeed;
+            if (keys.ArrowDown) pitch -= lookSpeed;
+            
+            pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+
+            camera.rotation.y = yaw;
+            camera.rotation.x = pitch;
+
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            const up = new THREE.Vector3(0, 1, 0);
+
+            if (keys.w) camera.position.addScaledVector(forward, speed);
+            if (keys.s) camera.position.addScaledVector(forward, -speed);
+            if (keys.d) camera.position.addScaledVector(right, speed);
+            if (keys.a) camera.position.addScaledVector(right, -speed);
+            if (keys.q) camera.position.addScaledVector(up, speed);
+            if (keys.e) camera.position.addScaledVector(up, -speed);
+        }
+
+        function onMouseClick(event) {
+            if (isLocked) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(cameraMarkers);
+
+            if (intersects.length > 0) {
+                const target = intersects[0].object.userData;
+                startTransition(target);
+            }
+        }
+
+        function startTransition(data) {
+            isLocked = true; 
+
+            const startPos = camera.position.clone();
+            const startQuat = camera.quaternion.clone();
+            const startFov = camera.fov;
+
+            const endPos = new THREE.Vector3().fromArray(data.pos);
+            const endQuat = new THREE.Quaternion().fromArray(data.quat);
+            const endFov = data.fov || 60;
+
+            new TWEEN.Tween({ t: 0 })
+                .to({ t: 1 }, 2000) 
+                .easing(TWEEN.Easing.Cubic.InOut) 
+                .onUpdate(({ t }) => {
+                    camera.position.copy(startPos).lerp(endPos, t);
+                    camera.quaternion.copy(startQuat).slerp(endQuat, t);
+                    camera.fov = THREE.MathUtils.lerp(startFov, endFov, t);
+                    camera.updateProjectionMatrix();
+                })
+                .onComplete(() => {
+                    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ");
+                    yaw = euler.y;
+                    pitch = euler.x;
+                    
+                    showOverlay(data.file);
+                })
+                .start();
+        }
+
+        function showOverlay(filename) {
+            const overlay = document.getElementById('overlay');
+            const exitBtn = document.getElementById('exit-btn');
+            
+            overlay.style.backgroundImage = `url('./${filename}')`;
+            
+            overlay.style.opacity = 1;
+            overlay.style.pointerEvents = 'auto';
+            
+            setTimeout(() => { exitBtn.style.display = 'block'; }, 1000);
+        }
+
+        function exitViewMode() {
+            const overlay = document.getElementById('overlay');
+            const exitBtn = document.getElementById('exit-btn');
+            
+            overlay.style.opacity = 0;
+            overlay.style.pointerEvents = 'none';
+            exitBtn.style.display = 'none';
+            
+            const backward = new THREE.Vector3(0, 0, 1).applyQuaternion(camera.quaternion);
+            new TWEEN.Tween(camera.position)
+                .to(camera.position.clone().addScaledVector(backward, 0.2), 1000)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onComplete(() => {
+                    isLocked = false; 
+                })
+                .start();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+            TWEEN.update(time); 
+            updateControls();   
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
