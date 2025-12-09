@@ -19,5 +19,3 @@ This project implements an Incremental Structure-from-Motion (SfM) pipeline to r
     * `Click Blue Dots`: Auto-navigate to image overlay
 
 ## Dependencies (note: since we didnt push .ply file, we cannot run it, if you want to run, please ask for.ply from metashape file, please and thankyou)
-Install the required Python packages:
-```bash
