@@ -19,3 +19,25 @@ This project implements an Incremental Structure-from-Motion (SfM) pipeline to r
     * `Click Blue Dots`: Auto-navigate to image overlay
 
 ## Dependencies (note: since we didnt push .ply file, we cannot run it, if you want to run, please ask for.ply from metashape file, please and thankyou)
+
+```text
+CS436_Final_Project/
+│
+├── README.md                # Project documentation and usage guide
+├── requirements.txt         # List of required Python libraries
+│
+├── pipeline/                # Python SfM Reconstruction Pipeline
+│   ├── Group_28_week1.py    # Feature Detection & Matching (SIFT)
+│   ├── Group_28_week2.py    # Two-View Reconstruction & Triangulation
+│   ├── Group_28_week3.py    # Incremental SfM Loop
+│
+├── web_viewer/              # Interactive Virtual Tour (Three.js)
+│   ├── index.html           # Main viewer application
+│   ├── cameras.json         # Aligned Camera Poses
+│   └── cameras_final.json
+│
+└── dataset/             # Original Input Image Sequence
+    ├── test1.jpeg
+    ├── test2.jpeg
+    └── ...
+```
