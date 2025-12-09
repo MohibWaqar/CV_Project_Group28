@@ -37,7 +37,7 @@ CS436_Final_Project/
 │   └── cameras_final.json
 │
 └── dataset/             # Original Input Image Sequence
-    ├── test1.jpeg
-    ├── test2.jpeg
+    ├── 1.jpeg
+    ├── 2.jpeg
     └── ...
 ```
